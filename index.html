@@ -298,7 +298,7 @@ input[type=range]{width:110px;accent-color:var(--accent)}
 /* =========================================================
    Handwriting Planner — core
    ========================================================= */
-const APP_VERSION = 'v8';
+const APP_VERSION = 'v9';
 const PAGE_W = 1600, PAGE_H = 1180;
 const L = {
   side : {x:56,  w:252},
@@ -1570,9 +1570,23 @@ $('bMenu').onclick=()=>{
     <h2 style="margin-top:22px">診断</h2>
     <p>ペンの入力が途切れる場合、原因が「アプリの処理落ち」なのか「iPadOS側の横取り」なのかを切り分けられます。ONにして数文字書き、左下の表示を撮って送ってください。</p>
     <div class="mrow"><button class="btn" id="mDiag">診断表示の ON / OFF</button></div>
-    <h2 style="margin-top:22px">iPad / PC でアプリとして使う</h2>
-    <p>Safari または Chrome でこのページを開き、共有メニューから「ホーム画面に追加」。アドレスバーのないフルスクリーンのアプリとして起動します。</p>
+    <h2 style="margin-top:22px">アプリとして使う</h2>
+    <p id="mInstMsg"></p>
+    <div class="mrow"><button class="btn pri" id="mInstall" hidden>このPCにアプリとしてインストール</button></div>
+    <p style="margin-top:10px"><b>PCのキーボード操作</b></p>
+    <p>Ctrl+Z 元に戻す ／ Ctrl+Shift+Z やり直す ／ Delete 選択を削除 ／ Esc 選択解除<br>
+       [ 前の月 ／ ] 次の月 ／ Ctrl+ホイール 拡大縮小 ／ ホイール 上下スクロール</p>
   `,(box,close)=>{
+    const ib=box.querySelector('#mInstall'), im=box.querySelector('#mInstMsg');
+    if(matchMedia('(display-mode: standalone)').matches){
+      im.textContent='いまアプリとして起動しています。';
+    }else if(deferredInstall){
+      ib.hidden=false;
+      im.textContent='アドレスバーのないウィンドウで起動し、オフラインでも開けるようになります。';
+      ib.onclick=async()=>{ const d=deferredInstall; deferredInstall=null; close(); d.prompt(); await d.userChoice; };
+    }else{
+      im.textContent='iPad（Safari）は共有メニューの「ホーム画面に追加」、Chromeはアドレスバー右のインストールアイコンから追加できます。';
+    }
     box.querySelector('#mDiag').onclick=()=>{
       DIAG.on=!DIAG.on; $('diag').hidden=!DIAG.on; if(DIAG.on) diagPaint(); close();
       toast(DIAG.on?'診断表示をONにしました':'診断表示をOFFにしました');
