@@ -35,11 +35,14 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 
 /* ---------- toolbar ---------- */
 #chrome{position:relative;z-index:60}
+/* 3分割グリッド：中央列にツールを置くと、右側に情報があっても中央に揃う */
 .bar{
   background:linear-gradient(#2d5479,#24425f); color:#fff;
-  display:flex;align-items:center;gap:6px;padding:7px 10px;flex-wrap:wrap;
-  box-shadow:0 1px 0 rgba(0,0,0,.15)
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;
+  gap:6px;padding:7px 10px;box-shadow:0 1px 0 rgba(0,0,0,.15)
 }
+.barC{display:flex;align-items:center;gap:6px;justify-self:center}
+.barR{display:flex;align-items:center;gap:6px;justify-self:end}
 .bar .sp{flex:1}
 .tbtn{
   width:38px;height:34px;border-radius:9px;display:grid;place-items:center;
@@ -60,9 +63,12 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 /* option row */
 .opts{
   background:#f4f6f8;border-bottom:1px solid var(--line);
-  display:flex;align-items:center;gap:10px;padding:7px 12px;flex-wrap:wrap;
-  font-size:12px;color:#41505f;min-height:44px
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;
+  gap:10px;padding:7px 12px;font-size:12px;color:#41505f;min-height:44px
 }
+.optsC{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;justify-self:center}
+.optsR{display:flex;align-items:center;gap:12px;justify-self:end}
+.optsR .switch{white-space:nowrap}
 .opts .grp{display:flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:4px 8px}
 .opts label{font-size:11px;color:var(--muted);letter-spacing:.03em}
 #penColors,#mkColors,#txColors{display:inline-flex;gap:7px;align-items:center}
@@ -170,12 +176,20 @@ input[type=range]{width:110px;accent-color:var(--accent)}
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#24425f;color:#fff;
   padding:10px 18px;border-radius:999px;font-size:13px;z-index:300;opacity:0;transition:opacity .25s;pointer-events:none}
 .toast.on{opacity:1}
-@media (max-width:820px){ .savechip{display:none} }
+@media (max-width:1100px){
+  .bar,.opts{display:flex;flex-wrap:wrap;justify-content:center}
+  .barL,.optsL{display:none}
+  .barC,.barR,.optsC,.optsR{flex-wrap:wrap;justify-content:center}
+}
+@media (max-width:1280px){ .hint2{display:none} }
+@media (max-width:820px){ .savechip,.verchip{display:none} }
 </style>
 </head>
 <body>
 <div id="chrome">
   <div class="bar">
+    <div class="barL"></div>
+    <div class="barC">
     <button class="tbtn" id="tSelect" title="なげなわ / 選択">
       <svg viewBox="0 0 24 24"><path d="M12 4c4.4 0 8 2.5 8 5.6 0 3-3.6 5.5-8 5.5-1 0-2-.1-2.9-.4"/><path d="M9.1 14.7C6.6 13.7 5 11.8 5 9.6 5 6.5 8.6 4 12 4"/><path d="M9.1 14.7c-.8 1.6-.3 3.4 1 4.3"/><circle cx="10.6" cy="19.7" r="1.4"/></svg>
     </button>
@@ -197,7 +211,8 @@ input[type=range]{width:110px;accent-color:var(--accent)}
     <div class="divider"></div>
     <button class="tbtn" id="bUndo" title="元に戻す"><svg viewBox="0 0 24 24"><path d="M9 8H5V4"/><path d="M5 8a8 8 0 113 9.5"/></svg></button>
     <button class="tbtn" id="bRedo" title="やり直す"><svg viewBox="0 0 24 24"><path d="M15 8h4V4"/><path d="M19 8a8 8 0 10-3 9.5"/></svg></button>
-    <div class="sp"></div>
+    </div>
+    <div class="barR">
     <span class="savechip" id="saveChip">保存済み</span>
     <span class="verchip" id="verChip"></span>
     <button class="tbtn" id="bZoomOut" title="縮小"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M8.5 11h5M16 16l4 4"/></svg></button>
@@ -205,9 +220,12 @@ input[type=range]{width:110px;accent-color:var(--accent)}
     <button class="tbtn" id="bFit" title="全体表示"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     <div class="divider"></div>
     <button class="tbtn" id="bMenu" title="保存・同期・設定"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></button>
+    </div>
   </div>
 
   <div class="opts" id="opts">
+    <div class="optsL"></div>
+    <div class="optsC">
     <!-- pen / marker -->
     <div class="grp" data-for="pen marker">
       <label>太さ</label>
@@ -250,9 +268,11 @@ input[type=range]{width:110px;accent-color:var(--accent)}
       <button class="mini" id="fsPlus">＋</button>
     </div>
     <div class="grp" data-for="text"><label>色</label><span id="txColors"></span></div>
-    <div class="sp" style="flex:1"></div>
-    <span class="switch" style="color:#8d97a1">2本指ピンチ＝拡大縮小 ／ 2本指ダブルタップ＝元に戻す</span>
+    </div>
+    <div class="optsR">
+    <span class="switch hint2" style="color:#8d97a1">2本指：ピンチで拡縮・スライドで移動・ダブルタップで元に戻す</span>
     <label class="switch"><input type="checkbox" id="penOnly"> ペンのみ描画（指はスクロール）</label>
+    </div>
   </div>
 </div>
 
@@ -276,7 +296,7 @@ input[type=range]{width:110px;accent-color:var(--accent)}
 /* =========================================================
    Handwriting Planner — core
    ========================================================= */
-const APP_VERSION = 'v7';
+const APP_VERSION = 'v8';
 const PAGE_W = 1600, PAGE_H = 1180;
 const L = {
   side : {x:56,  w:252},
@@ -652,14 +672,14 @@ function imgFor(src){
   if(IMGC[src]) return IMGC[src];
   const im=new Image(); im.onload=()=>render(); im.src=src; IMGC[src]=im; return im;
 }
-/* キャンバスの解像度上限。ズーム倍率をそのまま掛けると
-   1600x1180 の紙が最大 4800x3540＝約1700万画素になり、
-   iPad Safari ではメモリと転送量が破綻して描画が数秒固まる。 */
-const MAX_SCALE=2;
+/* キャンバスの解像度上限。ペン描画を「増えた区間だけ重ね描き」に変え、
+   裏キャンバスも常用しなくなったので、上限を 2 → 3 に戻せる。
+   画素数の上限も併せて持たせ、極端な確保を防ぐ。 */
+const MAX_SCALE=3, PIX_BUDGET=18e6;
 let ovScale=1;
 function fitCanvas(){
   const dpr=window.devicePixelRatio||1;
-  dprEff=Math.min(dpr*S.zoom,MAX_SCALE);
+  dprEff=Math.min(dpr*S.zoom,MAX_SCALE,Math.sqrt(PIX_BUDGET/(PAGE_W*PAGE_H)));
   cv.width=Math.round(PAGE_W*dprEff); cv.height=Math.round(PAGE_H*dprEff);
   cv.style.width=PAGE_W+'px'; cv.style.height=PAGE_H+'px';
   ctx.setTransform(dprEff,0,0,dprEff,0,0);
@@ -790,7 +810,7 @@ function requestRender(){
    コストが変わらないのがポイント。
    マーカー（乗算合成）と定規モードは重ね描きできないので、確定分を裏キャンバスに
    焼いてから転送する従来方式を使う。 */
-let baseCv=null, baseCtx=null, baseValid=false, liveRaf=null;
+let baseCv=null, baseCtx=null, baseValid=false, liveRaf=null, baseFree=null;
 let liveMode='append', drawnIdx=0;
 function appendDraw(){
   const it=cursor; if(!it) return;
@@ -828,7 +848,9 @@ function liveRender(){
 }
 
 /* ---------- オーバーレイ（選択・なげなわ） ---------- */
-let lassoPts=null, lassoRect=null;
+let lassoPts=null, lassoRect=null, eraCursor=null;
+let ovRaf=null;
+function requestOverlay(){ if(ovRaf) return; ovRaf=requestAnimationFrame(()=>{ ovRaf=null; renderOverlay(); }); }
 function renderOverlay(){
   octx.clearRect(0,0,PAGE_W,PAGE_H);
   octx.save();
@@ -843,6 +865,12 @@ function renderOverlay(){
     octx.strokeRect(lassoRect.x,lassoRect.y,lassoRect.w,lassoRect.h);
     octx.fillStyle='rgba(61,126,189,.08)';
     octx.fillRect(lassoRect.x,lassoRect.y,lassoRect.w,lassoRect.h);
+  }
+  if(eraCursor){                       // 消しゴムの当たる範囲
+    octx.beginPath(); octx.arc(eraCursor[0],eraCursor[1],S.eraser.size/2,0,7);
+    octx.fillStyle='rgba(110,130,150,.14)'; octx.fill();
+    octx.setLineDash([4,3]); octx.strokeStyle='rgba(70,90,110,.6)'; octx.lineWidth=1.2;
+    octx.stroke(); octx.setLineDash([]);
   }
   const b=S.selBox;
   if(b){
@@ -943,6 +971,12 @@ window.addEventListener('pointercancel',onUp);
    その間ブラウザにイベントが届かず、線が途中で切れる（Excalidraw も同じ修正を入れている）。
    touchstart / touchmove の既定動作を「即座に」打ち消すと、この要素は自前で
    入力を扱うとシステムに伝わり、横取りされなくなる。 */
+cv.addEventListener('pointermove',e=>{                 // 消しゴムの範囲表示
+  if(S.tool!=='eraser'){ if(eraCursor){ eraCursor=null; requestOverlay(); } return; }
+  if(mode&&mode!=='erase') return;
+  const [x,y]=toPage(e); eraCursor=[x,y]; requestOverlay();
+});
+cv.addEventListener('pointerleave',()=>{ if(eraCursor){ eraCursor=null; requestOverlay(); } });
 cv.addEventListener('touchstart',e=>{ e.preventDefault(); },{passive:false});
 cv.addEventListener('touchmove',e=>{ e.preventDefault(); },{passive:false});
 
@@ -1030,7 +1064,10 @@ function onDown(ev){
     if(touches.size>=2){
       cancelStroke(); pan=null;
       const t=[...touches.values()];
-      pinch={d:dist2(t[0],t[1])||1, z:S.zoom};
+      const mx=(t[0].x+t[1].x)/2, my=(t[0].y+t[1].y)/2;
+      const pr=page.getBoundingClientRect();
+      // 開始時に指の中心にあった「紙の座標」を覚えておき、以後そこを指に追従させる
+      pinch={d:dist2(t[0],t[1])||1, z:S.zoom, px:(mx-pr.left)/S.zoom, py:(my-pr.top)/S.zoom};
       mode='pinch';
       return;
     }
@@ -1082,7 +1119,8 @@ function onMove(ev){
     if(mode==='pinch'&&touches.size>=2){
       const t=[...touches.values()];
       const d=dist2(t[0],t[1])||1;
-      zoomAt(pinch.z*(d/pinch.d),(t[0].x+t[1].x)/2,(t[0].y+t[1].y)/2);
+      zoomAnchor(pinch.z*(d/pinch.d), pinch.px, pinch.py,
+                 (t[0].x+t[1].x)/2, (t[0].y+t[1].y)/2);
       return;
     }
     if(mode==='pan'&&pan){
@@ -1165,9 +1203,11 @@ function onUp(ev){
     cursor=null; drawType=null; drawId=null; baseValid=false;
     if(wasMarker||liveMode==='blit') requestRender();   // 重ね順を整えるのはこの時だけ
     liveMode='append';
+    clearTimeout(baseFree);
+    baseFree=setTimeout(()=>{ if(mode!=='draw'){ baseCv=null; baseCtx=null; baseValid=false; } },5000);
     scheduleSave();
   }
-  if(mode==='erase'){ scheduleSave(); }
+  if(mode==='erase'){ eraCursor=null; requestOverlay(); scheduleSave(); }
   if(mode==='lasso'||mode==='lassoRect'){
     const poly=mode==='lasso'?lassoPts:
       (lassoRect?[[lassoRect.x,lassoRect.y],[lassoRect.x+lassoRect.w,lassoRect.y],
@@ -1179,30 +1219,37 @@ function onUp(ev){
 }
 const uid=()=>Math.random().toString(36).slice(2,10);
 
-/* ---------- 消しゴム ---------- */
+/* ---------- 消しゴム ----------
+   以前は「記録された点」との距離だけで判定していたため、点と点の間隔が広い線
+   （速く書いた線・定規で直線化した2点だけの線）は真ん中を狙っても当たらなかった。
+   線分との最短距離で判定し、当たったストロークは1本まるごと消す。 */
+function distToSeg(px_,py_,a,b){
+  const vx=b[0]-a[0], vy=b[1]-a[1];
+  const L=vx*vx+vy*vy;
+  let t=L?((px_-a[0])*vx+(py_-a[1])*vy)/L:0;
+  t=Math.max(0,Math.min(1,t));
+  return Math.hypot(px_-(a[0]+t*vx), py_-(a[1]+t*vy));
+}
+function strokeHit(it,x,y,r){
+  const rr=r+(it.w0||2)/2, p=it.p;
+  if(p.length===1) return Math.hypot(p[0][0]-x,p[0][1]-y)<=rr;
+  for(let i=1;i<p.length;i++) if(distToSeg(x,y,p[i-1],p[i])<=rr) return true;
+  return false;
+}
 function eraseAt(x,y){
   const r=S.eraser.size/2;
-  const out=[];
-  let changed=false;
-  S.items.forEach(it=>{
+  const keep=[]; let changed=false;
+  for(const it of S.items){
     if(it.t==='stroke'){
-      const rr=r+it.w0/2;
-      let cur=[], segs=[], hit=false;
-      it.p.forEach(p=>{
-        if(Math.hypot(p[0]-x,p[1]-y)<=rr){ hit=true; if(cur.length>1) segs.push(cur); cur=[]; }
-        else cur.push(p);
-      });
-      if(cur.length>1) segs.push(cur);
-      if(!hit){ out.push(it); return; }
-      changed=true;
-      segs.forEach(s=>out.push({...it,id:uid(),p:s}));
+      if(strokeHit(it,x,y,r)){ changed=true; continue; }
+      keep.push(it);
     }else{
       const rc=itemRect(it);
-      if(x>=rc.x&&x<=rc.x+rc.w&&y>=rc.y&&y<=rc.y+rc.h){ changed=true; return; }
-      out.push(it);
+      if(x>=rc.x&&x<=rc.x+rc.w&&y>=rc.y&&y<=rc.y+rc.h){ changed=true; continue; }
+      keep.push(it);
     }
-  });
-  if(changed){ S.items=out; requestRender(); }
+  }
+  if(changed){ S.items=keep; requestRender(); }
 }
 
 /* ---------- 選択・変形 ---------- */
@@ -1370,6 +1417,7 @@ function setTool(t){
     g.style.display=f.includes(t)?'':'none';
   });
   cv.style.cursor = t==='select'?'default' : t==='text'?'text' : 'crosshair';
+  if(t!=='eraser'&&eraCursor){ eraCursor=null; requestOverlay(); }
   if(t!=='select') clearSel();
 }
 for(const k in TOOL_BTN) $(TOOL_BTN[k]).onclick=()=>setTool(k);
@@ -1444,19 +1492,24 @@ function applyZoom(){
   fitCanvas();
 }
 function setZoom(z){ S.zoom=Math.max(.3,Math.min(3,z)); applyZoom(); }
-/* ピンチ用：指の中心を固定したまま拡縮する（キャンバス再生成は指を離してから） */
-function zoomAt(z,cx,cy){
+/* ピンチ／2本指スライド用：
+   「紙のこの点(px,py)」を、いま指の中心がある画面座標(cx,cy)へ持っていく。
+   拡縮しなくても指の中心が動けば紙が付いてくるので、2本指スライド＝移動になる。
+   キャンバスの作り直しは指を離してから。 */
+function zoomAnchor(z,px,py,cx,cy){
   z=Math.max(.3,Math.min(3,z));
-  const pr=page.getBoundingClientRect();
-  const px=(cx-pr.left)/S.zoom, py=(cy-pr.top)/S.zoom;
   S.zoom=z;
   page.style.transform=`scale(${z})`;
   stage.style.width=(PAGE_W*z+44)+'px';
   stage.style.height=(PAGE_H*z+44)+'px';
-  const pr2=page.getBoundingClientRect();
-  scroller.scrollLeft+=(pr2.left+px*z)-cx;
-  scroller.scrollTop +=(pr2.top +py*z)-cy;
+  const pr=page.getBoundingClientRect();
+  scroller.scrollLeft+=(pr.left+px*z)-cx;
+  scroller.scrollTop +=(pr.top +py*z)-cy;
   invalidateRect();
+}
+function zoomAt(z,cx,cy){
+  const pr=page.getBoundingClientRect();
+  zoomAnchor(z,(cx-pr.left)/S.zoom,(cy-pr.top)/S.zoom,cx,cy);
 }
 function fitPage(){
   const w=scroller.clientWidth-52, h=scroller.clientHeight-52;
