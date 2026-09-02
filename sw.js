@@ -2,7 +2,7 @@
    方針：本体HTMLは「ネットワーク優先」。更新が必ず届き、オフライン時だけ
    キャッシュを使う。アイコン等の静的ファイルは「キャッシュ優先」。
    古い版が延々と残る事故を避けるため、HTMLは絶対にキャッシュ優先にしない。 */
-const CACHE = 'planner-v9';
+const CACHE = 'planner-v10';
 const ASSETS = ['./', './index.html', './manifest.webmanifest',
                 './icon-192.png', './icon-512.png', './icon-maskable.png'];
 

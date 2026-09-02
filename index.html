@@ -170,6 +170,9 @@ input[type=range]{width:110px;accent-color:var(--accent)}
 .mrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 .btn{padding:9px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;font-size:13px}
 .btn.pri{background:var(--bar);border-color:var(--bar);color:#fff}
+#bSync[data-state="off"]{opacity:.45}
+#bSync[data-state="sync"]{color:#9fd3ff}
+#bSync[data-state="err"]{color:#ffb3b3}
 .verchip{font-size:11px;opacity:.55;padding:0 6px;letter-spacing:.04em}
 #diag{position:fixed;left:10px;bottom:10px;z-index:150;background:rgba(20,32,46,.92);color:#cfe6ff;
   font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;padding:9px 11px;border-radius:10px;
@@ -217,6 +220,9 @@ input[type=range]{width:110px;accent-color:var(--accent)}
     <div class="barR">
     <span class="savechip" id="saveChip">保存済み</span>
     <span class="verchip" id="verChip"></span>
+    <button class="tbtn" id="bSync" data-state="off" title="Google Drive">
+      <svg viewBox="0 0 24 24"><path d="M7 18.5a4 4 0 01-.4-8A5.5 5.5 0 0117.6 9 3.75 3.75 0 0117 18.5z"/><path d="M12 15.5v-6M9.5 12L12 9.5l2.5 2.5"/></svg>
+    </button>
     <button class="tbtn" id="bZoomOut" title="縮小"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M8.5 11h5M16 16l4 4"/></svg></button>
     <button class="tbtn" id="bZoomIn" title="拡大"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M8.5 11h5M11 8.5v5M16 16l4 4"/></svg></button>
     <button class="tbtn" id="bFit" title="全体表示"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
@@ -298,7 +304,7 @@ input[type=range]{width:110px;accent-color:var(--accent)}
 /* =========================================================
    Handwriting Planner — core
    ========================================================= */
-const APP_VERSION = 'v9';
+const APP_VERSION = 'v10';
 const PAGE_W = 1600, PAGE_H = 1180;
 const L = {
   side : {x:56,  w:252},
@@ -907,6 +913,7 @@ function scheduleSave(){
   saveTimer=setTimeout(async()=>{
     await Store.put(curId,{v:1,items:S.items,at:Date.now()});
     chip('保存済み');
+    if(typeof scheduleSync==='function') scheduleSync();
   },300);
 }
 async function flushSave(){
@@ -1549,24 +1556,18 @@ $('bMenu').onclick=()=>{
       <button class="btn" id="mExp">JSONを書き出す</button>
       <button class="btn" id="mImp">JSONを読み込む</button>
     </div>
-    <h2 style="margin-top:22px">Google Drive 同期（BYOD）</h2>
-    <p>ご自身のGoogle Driveに <b>planner-backup.json</b> として保存します。サーバー不要・データはご自身の管理下に置かれます。</p>
-    <p style="margin-top:10px"><b>OAuth クライアントID</b></p>
-    <input type="text" id="mCid" placeholder="xxxxxxxx.apps.googleusercontent.com" value="${cid}">
-    <details style="margin-top:10px"><summary style="font-size:12.5px;color:#3d7ebd;cursor:pointer">クライアントIDの取り方</summary>
-      <ol>
-        <li>Google Cloud Console で新規プロジェクトを作成</li>
-        <li>「APIとサービス」→ Google Drive API を有効化</li>
-        <li>「OAuth同意画面」を外部・テストユーザーに自分を追加</li>
-        <li>「認証情報」→ OAuthクライアントID →「ウェブアプリケーション」</li>
-        <li>承認済みJavaScript生成元に、このアプリを置くURL（例: https://yourname.github.io）を登録</li>
-        <li>発行されたクライアントIDを上の欄に貼り付け</li>
-      </ol>
-    </details>
+    <h2 style="margin-top:22px">Google Drive 同期</h2>
+    <p id="mSyncMsg"></p>
     <div class="mrow">
-      <button class="btn pri" id="mBk">Driveへバックアップ</button>
-      <button class="btn" id="mRs">Driveから復元</button>
+      <button class="btn pri" id="mConn">Driveに接続</button>
+      <button class="btn" id="mSyncNow">今すぐ同期</button>
+      <button class="btn" id="mDisc">接続を解除</button>
     </div>
+    <p style="margin-top:10px">ご自身のDriveに <b>planner-backup.json</b> として保存されます。書き込みが落ち着いた頃・アプリを閉じるとき・起動したときに自動で同期します。ページ単位で新しい方を残すので、iPadとPCを交互に使っても消えません。</p>
+    <details style="margin-top:10px"><summary style="font-size:12.5px;color:#3d7ebd;cursor:pointer">別のGoogleアカウントで使う場合</summary>
+      <p>ご自身でOAuthクライアントIDを発行して差し替えられます（空欄なら既定のIDを使用）。</p>
+      <input type="text" id="mCid" placeholder="xxxxxxxx.apps.googleusercontent.com" value="${cid}">
+    </details>
     <h2 style="margin-top:22px">診断</h2>
     <p>ペンの入力が途切れる場合、原因が「アプリの処理落ち」なのか「iPadOS側の横取り」なのかを切り分けられます。ONにして数文字書き、左下の表示を撮って送ってください。</p>
     <div class="mrow"><button class="btn" id="mDiag">診断表示の ON / OFF</button></div>
@@ -1593,15 +1594,19 @@ $('bMenu').onclick=()=>{
     };
     box.querySelector('#mExp').onclick=async()=>{ await exportJSON(); };
     box.querySelector('#mImp').onclick=()=>{ $('jsonInput').click(); close(); };
-    box.querySelector('#mCid').onchange=e=>localStorage.setItem('gdrive_client_id',e.target.value.trim());
-    box.querySelector('#mBk').onclick=async()=>{
-      localStorage.setItem('gdrive_client_id',box.querySelector('#mCid').value.trim());
-      close(); await driveBackup();
+    const cidIn=box.querySelector('#mCid');
+    if(cidIn) cidIn.onchange=e=>{
+      const v=e.target.value.trim();
+      if(v) localStorage.setItem('gdrive_client_id',v); else localStorage.removeItem('gdrive_client_id');
+      tokenClient=null; accessToken=null;
     };
-    box.querySelector('#mRs').onclick=async()=>{
-      localStorage.setItem('gdrive_client_id',box.querySelector('#mCid').value.trim());
-      close(); await driveRestore();
-    };
+    const conn=!!localStorage.getItem('drive_connected');
+    box.querySelector('#mSyncMsg').textContent = conn
+      ? ('接続済み'+(syncAt?'（最終同期 '+new Date(syncAt).toLocaleString('ja-JP')+'）':''))
+      : 'この端末はまだ未接続です。「Driveに接続」を押してGoogleアカウントを選び、アクセスを許可してください。';
+    box.querySelector('#mConn').onclick=async()=>{ close(); await syncNow(true); };
+    box.querySelector('#mSyncNow').onclick=async()=>{ close(); await syncNow(true); };
+    box.querySelector('#mDisc').onclick=()=>{ close(); disconnectDrive(); };
   });
 };
 async function exportJSON(){
@@ -1627,79 +1632,145 @@ $('jsonInput').addEventListener('change',e=>{
   fr.readAsText(f); e.target.value='';
 });
 
-/* ---------- Google Drive ---------- */
+/* ---------- Google Drive 自動同期 ----------
+   端末内(IndexedDB)を正、Driveの planner-backup.json を「合流点」として扱う。
+   ページ単位に更新時刻(at)を持たせ、両方にあるページは新しい方を採用する。
+   これで iPad と PC を交互に使っても、どちらの書き込みも失われない。
+   クライアントIDはコードに埋め込む（公開情報なので秘密ではない）。
+   これにより端末ごとの設定入力が不要になる。別アカウントで使いたい場合だけ
+   メニューから自分のIDに差し替えられる。 */
 const DRIVE_FILE='planner-backup.json';
-let gisReady=null, accessToken=null, tokenExp=0;
+const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
+const DEFAULT_CLIENT_ID='131575943078-7lelv910eidols7vjtgr5m5pmjmf48po.apps.googleusercontent.com';
+const clientId=()=>(localStorage.getItem('gdrive_client_id')||DEFAULT_CLIENT_ID).trim();
+
+let gisReady=null, tokenClient=null, accessToken=null, tokenExp=0;
+let syncState='off', syncAt=0, syncTimer=null, syncing=false;
+
 function loadGIS(){
   if(gisReady) return gisReady;
   gisReady=new Promise((res,rej)=>{
-    if(window.google&&google.accounts) return res();
-    const s=document.createElement('script');
-    s.src='https://accounts.google.com/gsi/client'; s.async=true;
-    s.onload=()=>res(); s.onerror=()=>rej(new Error('gis'));
-    document.head.appendChild(s);
+    if(window.google&&google.accounts&&google.accounts.oauth2) return res();
+    const sc=document.createElement('script');
+    sc.src='https://accounts.google.com/gsi/client'; sc.async=true;
+    sc.onload=()=>res(); sc.onerror=()=>rej(new Error('gis'));
+    document.head.appendChild(sc);
   });
   return gisReady;
 }
-async function getToken(){
-  const cid=localStorage.getItem('gdrive_client_id');
-  if(!cid){ toast('先にクライアントIDを設定してください'); throw new Error('no client id'); }
+async function getToken(interactive){
   if(accessToken&&Date.now()<tokenExp-60000) return accessToken;
   await loadGIS();
-  return new Promise((res,rej)=>{
-    const tc=google.accounts.oauth2.initTokenClient({
-      client_id:cid,
-      scope:'https://www.googleapis.com/auth/drive.file',
-      callback:r=>{
-        if(r.error) return rej(new Error(r.error));
-        accessToken=r.access_token; tokenExp=Date.now()+(r.expires_in||3500)*1000; res(accessToken);
-      }
+  if(!tokenClient){
+    tokenClient=google.accounts.oauth2.initTokenClient({
+      client_id:clientId(), scope:DRIVE_SCOPE, callback:()=>{}
     });
-    tc.requestAccessToken({prompt:''});
+  }
+  return new Promise((res,rej)=>{
+    let done=false;
+    const timer=setTimeout(()=>{ if(!done){ done=true; rej(new Error('timeout')); } },20000);
+    tokenClient.callback=r=>{
+      if(done) return; done=true; clearTimeout(timer);
+      if(r.error) return rej(new Error(r.error));
+      accessToken=r.access_token; tokenExp=Date.now()+((r.expires_in||3500)*1000);
+      localStorage.setItem('drive_connected','1');
+      res(accessToken);
+    };
+    tokenClient.error_callback=e=>{ if(!done){ done=true; clearTimeout(timer); rej(new Error(e&&e.type||'auth')); } };
+    try{ tokenClient.requestAccessToken({prompt:interactive?'':'none'}); }
+    catch(e){ if(!done){ done=true; clearTimeout(timer); rej(e); } }
   });
 }
 async function driveFind(tok){
   const q=encodeURIComponent(`name='${DRIVE_FILE}' and trashed=false`);
   const r=await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,modifiedTime)`,
     {headers:{Authorization:'Bearer '+tok}});
+  if(!r.ok) throw new Error('list '+r.status);
   const j=await r.json();
   return (j.files&&j.files[0])||null;
 }
-async function driveBackup(){
+async function driveRead(tok,id){
+  const r=await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`,{headers:{Authorization:'Bearer '+tok}});
+  if(!r.ok) throw new Error('get '+r.status);
+  return r.json();
+}
+async function driveWrite(tok,id,body){
+  if(id){
+    const r=await fetch(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`,
+      {method:'PATCH',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body});
+    if(!r.ok) throw new Error('patch '+r.status);
+    return id;
+  }
+  const b='-----planner'+Date.now();
+  const meta=JSON.stringify({name:DRIVE_FILE,mimeType:'application/json'});
+  const multipart=`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n`+
+                  `--${b}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${b}--`;
+  const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+    {method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'multipart/related; boundary='+b},body:multipart});
+  if(!r.ok) throw new Error('post '+r.status);
+  return (await r.json()).id;
+}
+function setSync(st){ syncState=st; paintSync(); }
+function paintSync(){
+  const b=$('bSync'); if(!b) return;
+  const label={off:'Driveに接続',idle:'同期済み',sync:'同期中…',err:'同期エラー'}[syncState]||'';
+  b.title='Google Drive：'+label+(syncAt&&syncState==='idle'?'（'+new Date(syncAt).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})+'）':'');
+  b.dataset.state=syncState;
+}
+/* 中核：Driveと端末内をページ単位で新しい方に寄せる */
+async function syncNow(interactive){
+  if(syncing) return;
+  if(typeof mode!=='undefined'&&mode==='draw') return;      // 描いている最中は触らない
+  syncing=true; setSync('sync');
   try{
-    chip('Drive同期中…');
+    const tok=await getToken(interactive);
     await flushSave();
-    const tok=await getToken();
-    const body=JSON.stringify({app:'handwriting-planner',v:1,at:new Date().toISOString(),pages:await Store.all()});
     const f=await driveFind(tok);
-    if(f){
-      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${f.id}?uploadType=media`,
-        {method:'PATCH',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body});
-    }else{
-      const boundary='-------planner'+Date.now();
-      const meta=JSON.stringify({name:DRIVE_FILE,mimeType:'application/json'});
-      const multipart=
-        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n`+
-        `--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
-      await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-        {method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'multipart/related; boundary='+boundary},body:multipart});
+    const remote=f?await driveRead(tok,f.id):null;
+    const rPages=(remote&&remote.pages)||{};
+    const lPages=await Store.all();
+    const ids=new Set([...Object.keys(rPages),...Object.keys(lPages)]);
+    const merged={}; const pullIn={}; let pushNeeded=!f;
+    ids.forEach(id=>{
+      const r=rPages[id], l=lPages[id];
+      const rt=(r&&r.at)||0, lt=(l&&l.at)||0;
+      if(rt>lt){ merged[id]=r; pullIn[id]=r; }
+      else{ merged[id]=l||r; if(lt>rt) pushNeeded=true; }
+    });
+    if(Object.keys(pullIn).length) await Store.putAll(pullIn);
+    if(pushNeeded){
+      const body=JSON.stringify({app:'handwriting-planner',v:1,at:new Date().toISOString(),pages:merged});
+      await driveWrite(tok,f&&f.id,body);
     }
-    chip('保存済み'); toast('Google Driveへバックアップしました');
-  }catch(e){ chip('保存済み'); toast('Drive同期に失敗しました（設定と通信環境をご確認ください）',3200); }
+    if(pullIn[curId]) await loadPage();                      // 開いているページが更新されたら反映
+    syncAt=Date.now(); setSync('idle');
+    if(interactive) toast('Google Driveと同期しました');
+  }catch(e){
+    setSync(localStorage.getItem('drive_connected')?'err':'off');
+    if(interactive) toast('Driveに接続できませんでした（'+(e&&e.message||'エラー')+'）',3200);
+  }finally{ syncing=false; }
 }
-async function driveRestore(){
-  try{
-    chip('Drive読込中…');
-    const tok=await getToken();
-    const f=await driveFind(tok);
-    if(!f){ chip('保存済み'); return toast('Drive上にバックアップが見つかりません'); }
-    const r=await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`,{headers:{Authorization:'Bearer '+tok}});
-    const d=await r.json();
-    if(!d.pages) throw 0;
-    await Store.putAll(d.pages);
-    await loadPage(); chip('保存済み'); toast('Driveから復元しました');
-  }catch(e){ chip('保存済み'); toast('復元に失敗しました',3200); }
+function scheduleSync(){
+  if(!localStorage.getItem('drive_connected')) return;
+  clearTimeout(syncTimer);
+  syncTimer=setTimeout(()=>syncNow(false),20000);            // 書き込みが落ち着いたら送る
 }
+function disconnectDrive(){
+  localStorage.removeItem('drive_connected');
+  accessToken=null; tokenExp=0; setSync('off');
+  toast('Drive同期を解除しました');
+}
+$('bSync').onclick=()=>syncNow(true);
+(function initDrive(){
+  paintSync();
+  if(localStorage.getItem('drive_connected')){
+    setSync('idle');
+    setTimeout(()=>syncNow(false),2500);                     // 起動時に取り込む
+  }
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden&&localStorage.getItem('drive_connected')) syncNow(false);
+  });
+})();
 
 /* ---------- PWA ----------
    manifest.webmanifest / sw.js / アイコンは index.html と同じ場所に置く。
