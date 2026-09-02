@@ -746,10 +746,46 @@ function drawItem(c,it){
     c.restore();
   }
 }
+function paintAll(c,list){
+  list.filter(i=>i.t==='stroke'&&i.mode==='marker').forEach(i=>drawItem(c,i));
+  list.filter(i=>!(i.t==='stroke'&&i.mode==='marker')).forEach(i=>drawItem(c,i));
+}
 function render(){
+  baseValid=false;
   ctx.clearRect(0,0,PAGE_W,PAGE_H);
-  S.items.filter(i=>i.t==='stroke'&&i.mode==='marker').forEach(i=>drawItem(ctx,i));
-  S.items.filter(i=>!(i.t==='stroke'&&i.mode==='marker')).forEach(i=>drawItem(ctx,i));
+  paintAll(ctx,S.items);
+}
+/* 全再描画は1フレームに1回までに間引く */
+let fullRaf=null;
+function requestRender(){
+  if(fullRaf) return;
+  fullRaf=requestAnimationFrame(()=>{ fullRaf=null; render(); });
+}
+
+/* ---- 描画中の高速パス ----
+   確定済みのストロークを裏キャンバスに1度だけ焼き、毎フレームは
+   「裏キャンバスを転送 ＋ 今書いている1本」だけ描く。
+   これをしないとペンの高頻度イベントで全ストロークを描き直し続けて固まる。 */
+let baseCv=null, baseCtx=null, baseValid=false, liveRaf=null;
+function buildBase(exclude){
+  if(!baseCv){ baseCv=document.createElement('canvas'); baseCtx=baseCv.getContext('2d'); }
+  if(baseCv.width!==cv.width||baseCv.height!==cv.height){ baseCv.width=cv.width; baseCv.height=cv.height; }
+  baseCtx.setTransform(dprEff,0,0,dprEff,0,0);
+  baseCtx.clearRect(0,0,PAGE_W,PAGE_H);
+  paintAll(baseCtx,S.items.filter(i=>i!==exclude));
+  baseValid=true;
+}
+function paintLive(){
+  if(!baseValid) buildBase(cursor);
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(baseCv,0,0);
+  ctx.setTransform(dprEff,0,0,dprEff,0,0);
+  if(cursor) drawItem(ctx,cursor);
+}
+function liveRender(){
+  if(liveRaf) return;
+  liveRaf=requestAnimationFrame(()=>{ liveRaf=null; if(mode==='draw'&&cursor) paintLive(); });
 }
 
 /* ---------- オーバーレイ（選択・なげなわ） ---------- */
@@ -861,8 +897,31 @@ cv.addEventListener('pointermove',onMove);
 window.addEventListener('pointerup',onUp);
 window.addEventListener('pointercancel',onUp);
 
+/* ---------- 定規スナップ：ペンを止めたまま約0.9秒で直線に整える ---------- */
+let holdAnchor=[0,0], holdTimer=null;
+const HOLD_MS=900, HOLD_MIN_LEN=40;
+function armHold(){
+  clearTimeout(holdTimer);
+  if(!cursor||cursor.straight) return;
+  holdTimer=setTimeout(straighten,HOLD_MS);
+}
+function disarmHold(){ clearTimeout(holdTimer); holdTimer=null; }
+function straighten(){
+  if(mode!=='draw'||!cursor||cursor.straight) return;
+  const p=cursor.p;
+  if(p.length<3) return;
+  const a=p[0], b=p[p.length-1];
+  if(Math.hypot(b[0]-a[0],b[1]-a[1])<HOLD_MIN_LEN) return;   // 短すぎる線は対象外
+  const pr=p.reduce((s,q)=>s+(q[2]??.5),0)/p.length;         // 太さを均一に
+  cursor.p=[[a[0],a[1],pr],[b[0],b[1],pr]];
+  cursor.straight=true;
+  paintLive();
+  toast('直線に整えました',1100);
+}
+
 /* 描きかけを取り消す（2本目の指が触れたとき用） */
 function cancelStroke(){
+  disarmHold();
   if(mode==='draw'&&cursor){
     S.items=S.items.filter(i=>i!==cursor);
     if(S.undo.length) S.undo.pop();
@@ -897,7 +956,10 @@ function onDown(ev){
       c:marker?S.marker.color:S.pen.color,
       w0:marker?MK_W[S.marker.w]:PEN_W[S.pen.w],
       p:[[x,y,ev.pressure||.5]]};
-    S.items.push(it); cursor=it; mode='draw'; render(); return;
+    S.items.push(it); cursor=it; mode='draw';
+    buildBase(it);                 // 確定済みを裏キャンバスへ1回だけ焼く
+    holdAnchor=[x,y]; armHold();   // 定規スナップの待機開始
+    paintLive(); return;
   }
   if(S.tool==='eraser'){ pushUndo(); mode='erase'; eraseAt(x,y); return; }
   if(S.tool==='text'){ if(ta){ closeEditor(); return; } createText(x,y); return; }
@@ -939,9 +1001,20 @@ function onMove(ev){
   const [x,y]=toPage(ev);
   movedFlag=true;
   if(mode==='draw'){
-    const evs=ev.getCoalescedEvents?ev.getCoalescedEvents():[ev];
-    evs.forEach(e=>{ const [px_,py_]=toPage(e); cursor.p.push([px_,py_,e.pressure||.5]); });
-    render(); return;
+    if(cursor.straight){                       // 定規モード：終点だけ動かす
+      cursor.p[1]=[x,y,cursor.p[1][2]];
+    }else{
+      let evs=ev.getCoalescedEvents?ev.getCoalescedEvents():[];
+      if(!evs.length) evs=[ev];
+      for(const e of evs){
+        const [ax,ay]=toPage(e);
+        const last=cursor.p[cursor.p.length-1];
+        if(Math.hypot(ax-last[0],ay-last[1])<0.8) continue;   // 点を間引く
+        cursor.p.push([ax,ay,e.pressure||.5]);
+      }
+    }
+    if(Math.hypot(x-holdAnchor[0],y-holdAnchor[1])>3){ holdAnchor=[x,y]; armHold(); }
+    liveRender(); return;
   }
   if(mode==='erase'){ eraseAt(x,y); return; }
   if(mode==='lasso'){ lassoPts.push([x,y]); renderOverlay(); return; }
@@ -952,20 +1025,20 @@ function onMove(ev){
   if(mode==='move'){
     const dx=x-start[0], dy=y-start[1]; start=[x,y];
     S.sel.forEach(it=>translate(it,dx,dy));
-    S.selBox=boxOf(S.sel); render(); renderOverlay(); scheduleSave(); return;
+    S.selBox=boxOf(S.sel); requestRender(); renderOverlay(); scheduleSave(); return;
   }
   if(mode==='scale'){
     const b=S.selBox, c=[b.x+b.w/2,b.y+b.h/2];
     const d=Math.hypot(x-c[0],y-c[1])||1;
     let f=d/lastDist; f=Math.max(.4,Math.min(2.4,f)); lastDist=d;
     S.sel.forEach(it=>scaleItem(it,f,c[0],c[1]));
-    S.selBox=boxOf(S.sel); render(); renderOverlay(); scheduleSave(); return;
+    S.selBox=boxOf(S.sel); requestRender(); renderOverlay(); scheduleSave(); return;
   }
   if(mode==='rotate'){
     const b=S.selBox, c=[b.x+b.w/2,b.y+b.h/2];
     const a=Math.atan2(y-c[1],x-c[0]); const da=a-lastAng; lastAng=a;
     S.sel.forEach(it=>rotateItem(it,da,c[0],c[1]));
-    S.selBox=boxOf(S.sel); render(); renderOverlay(); scheduleSave(); return;
+    S.selBox=boxOf(S.sel); requestRender(); renderOverlay(); scheduleSave(); return;
   }
 }
 function onUp(ev){
@@ -983,7 +1056,7 @@ function onUp(ev){
     }
     if(mode==='pinch'||mode==='pan') return;
   }
-  if(mode==='draw'){ cursor=null; scheduleSave(); }
+  if(mode==='draw'){ disarmHold(); cursor=null; baseValid=false; render(); scheduleSave(); }
   if(mode==='erase'){ scheduleSave(); }
   if(mode==='lasso'||mode==='lassoRect'){
     const poly=mode==='lasso'?lassoPts:
@@ -1019,7 +1092,7 @@ function eraseAt(x,y){
       out.push(it);
     }
   });
-  if(changed){ S.items=out; render(); }
+  if(changed){ S.items=out; requestRender(); }
 }
 
 /* ---------- 選択・変形 ---------- */
