@@ -644,15 +644,29 @@ function imgFor(src){
   if(IMGC[src]) return IMGC[src];
   const im=new Image(); im.onload=()=>render(); im.src=src; IMGC[src]=im; return im;
 }
+/* キャンバスの解像度上限。ズーム倍率をそのまま掛けると
+   1600x1180 の紙が最大 4800x3540＝約1700万画素になり、
+   iPad Safari ではメモリと転送量が破綻して描画が数秒固まる。 */
+const MAX_SCALE=2;
+let ovScale=1;
 function fitCanvas(){
-  dprEff=Math.min((window.devicePixelRatio||1)*S.zoom,3);
-  [cv,ov].forEach(c=>{
-    c.width=Math.round(PAGE_W*dprEff); c.height=Math.round(PAGE_H*dprEff);
-    c.style.width=PAGE_W+'px'; c.style.height=PAGE_H+'px';
-    c.getContext('2d').setTransform(dprEff,0,0,dprEff,0,0);
-  });
+  const dpr=window.devicePixelRatio||1;
+  dprEff=Math.min(dpr*S.zoom,MAX_SCALE);
+  cv.width=Math.round(PAGE_W*dprEff); cv.height=Math.round(PAGE_H*dprEff);
+  cv.style.width=PAGE_W+'px'; cv.style.height=PAGE_H+'px';
+  ctx.setTransform(dprEff,0,0,dprEff,0,0);
+  ovScale=1;          // 選択枠しか描かないので等倍で十分
+  ov.width=Math.round(PAGE_W*ovScale); ov.height=Math.round(PAGE_H*ovScale);
+  ov.style.width=PAGE_W+'px'; ov.style.height=PAGE_H+'px';
+  octx.setTransform(ovScale,0,0,ovScale,0,0);
+  invalidateRect(); baseValid=false;
   render(); renderOverlay();
 }
+/* getBoundingClientRect はレイアウト再計算を強制する。
+   ペンは毎秒200回以上イベントを出すので、1ストローク中はキャッシュする。 */
+let rectCache=null;
+function invalidateRect(){ rectCache=null; }
+function pageRect(){ return rectCache||(rectCache=cv.getBoundingClientRect()); }
 
 /* ---------- テキスト計測 ---------- */
 function setFont(c,it){ c.font=`${it.size}px ${it.font}, "Hiragino Kaku Gothic ProN", sans-serif`; }
@@ -702,6 +716,13 @@ function boxOf(list){
 
 /* ---------- 本体描画 ---------- */
 let editingId=null;
+function segPath(c,it,a,b){
+  const pr=((a[2]??.5)+(b[2]??.5))/2;
+  c.lineWidth=it.w0*(0.58+0.62*pr);
+  c.beginPath(); c.moveTo(a[0],a[1]);
+  const mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;
+  c.quadraticCurveTo(a[0],a[1],mx,my); c.lineTo(b[0],b[1]); c.stroke();
+}
 function drawItem(c,it){
   if(it.id===editingId) return;
   if(it.t==='stroke'){
@@ -718,14 +739,7 @@ function drawItem(c,it){
       for(let i=1;i<p.length;i++) c.lineTo(p[i][0],p[i][1]);
       c.stroke();
     }else{
-      for(let i=1;i<p.length;i++){
-        const a=p[i-1],b=p[i];
-        const pr=((a[2]??.5)+(b[2]??.5))/2;
-        c.lineWidth=it.w0*(0.58+0.62*pr);
-        c.beginPath(); c.moveTo(a[0],a[1]);
-        const mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;
-        c.quadraticCurveTo(a[0],a[1],mx,my); c.lineTo(b[0],b[1]); c.stroke();
-      }
+      for(let i=1;i<p.length;i++) segPath(c,it,p[i-1],p[i]);
     }
     c.restore(); return;
   }
@@ -763,10 +777,27 @@ function requestRender(){
 }
 
 /* ---- 描画中の高速パス ----
-   確定済みのストロークを裏キャンバスに1度だけ焼き、毎フレームは
-   「裏キャンバスを転送 ＋ 今書いている1本」だけ描く。
-   これをしないとペンの高頻度イベントで全ストロークを描き直し続けて固まる。 */
+   ペン（不透明）は「増えた区間だけを重ね描き」する。画面消去も全面転送も
+   しないので、1フレームの仕事は増えた点の数だけ。ズームで解像度が上がっても
+   コストが変わらないのがポイント。
+   マーカー（乗算合成）と定規モードは重ね描きできないので、確定分を裏キャンバスに
+   焼いてから転送する従来方式を使う。 */
 let baseCv=null, baseCtx=null, baseValid=false, liveRaf=null;
+let liveMode='append', drawnIdx=0;
+function appendDraw(){
+  const it=cursor; if(!it) return;
+  const p=it.p;
+  if(p.length===1){
+    ctx.save(); ctx.beginPath(); ctx.arc(p[0][0],p[0][1],it.w0/2,0,7);
+    ctx.fillStyle=it.c; ctx.fill(); ctx.restore();
+    drawnIdx=0; return;
+  }
+  ctx.save();
+  ctx.strokeStyle=it.c; ctx.lineCap='round'; ctx.lineJoin='round';
+  for(let i=Math.max(1,drawnIdx+1);i<p.length;i++) segPath(ctx,it,p[i-1],p[i]);
+  ctx.restore();
+  drawnIdx=p.length-1;
+}
 function buildBase(exclude){
   if(!baseCv){ baseCv=document.createElement('canvas'); baseCtx=baseCv.getContext('2d'); }
   if(baseCv.width!==cv.width||baseCv.height!==cv.height){ baseCv.width=cv.width; baseCv.height=cv.height; }
@@ -873,9 +904,11 @@ function shiftMonth(dir){
 
 /* ---------- 座標 ---------- */
 function toPage(ev){
-  const r=cv.getBoundingClientRect();
+  const r=pageRect();
   return [ (ev.clientX-r.left)/S.zoom, (ev.clientY-r.top)/S.zoom ];
 }
+$('scroller').addEventListener('scroll',invalidateRect,{passive:true});
+window.addEventListener('resize',invalidateRect);
 function boxAt(x,y){
   let best=null;
   TEXT_BOXES.forEach(b=>{ if(x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h) best=b; });
@@ -915,7 +948,7 @@ function straighten(){
   const pr=p.reduce((s,q)=>s+(q[2]??.5),0)/p.length;         // 太さを均一に
   cursor.p=[[a[0],a[1],pr],[b[0],b[1],pr]];
   cursor.straight=true;
-  paintLive();
+  liveMode='blit'; buildBase(cursor); paintLive();   // 曲線を消すため一度だけ焼き直す
   toast('直線に整えました',1100);
 }
 
@@ -970,9 +1003,11 @@ function onDown(ev){
       p:[[x,y,ev.pressure||.5]]};
     S.items.push(it); cursor=it; mode='draw';
     drawType=ev.pointerType; drawId=ev.pointerId;   // このストロークの持ち主を固定
-    buildBase(it);                 // 確定済みを裏キャンバスへ1回だけ焼く
+    baseValid=false; drawnIdx=0;
+    if(marker){ liveMode='blit'; buildBase(it); paintLive(); }
+    else { liveMode='append'; appendDraw(); }
     holdAnchor=[x,y]; armHold();   // 定規スナップの待機開始
-    paintLive(); return;
+    return;
   }
   if(S.tool==='eraser'){ pushUndo(); mode='erase'; eraseAt(x,y); return; }
   if(S.tool==='text'){ if(ta){ closeEditor(); return; } createText(x,y); return; }
@@ -1029,7 +1064,8 @@ function onMove(ev){
       }
     }
     if(Math.hypot(x-holdAnchor[0],y-holdAnchor[1])>3){ holdAnchor=[x,y]; armHold(); }
-    liveRender(); return;
+    if(liveMode==='append') appendDraw(); else liveRender();
+    return;
   }
   if(mode==='erase'){ eraseAt(x,y); return; }
   if(mode==='lasso'){ lassoPts.push([x,y]); renderOverlay(); return; }
@@ -1075,7 +1111,14 @@ function onUp(ev){
     if(mode==='draw'&&drawType==='pen') return;     // ペンのストロークは指の離しで終わらせない
   }
   if(mode==='draw'&&drawId!=null&&ev&&ev.pointerId!==drawId) return;
-  if(mode==='draw'){ disarmHold(); cursor=null; drawType=null; drawId=null; baseValid=false; render(); scheduleSave(); }
+  if(mode==='draw'){
+    disarmHold();
+    const wasMarker=cursor&&cursor.mode==='marker';
+    cursor=null; drawType=null; drawId=null; baseValid=false;
+    if(wasMarker||liveMode==='blit') requestRender();   // 重ね順を整えるのはこの時だけ
+    liveMode='append';
+    scheduleSave();
+  }
   if(mode==='erase'){ scheduleSave(); }
   if(mode==='lasso'||mode==='lassoRect'){
     const poly=mode==='lasso'?lassoPts:
@@ -1365,6 +1408,7 @@ function zoomAt(z,cx,cy){
   const pr2=page.getBoundingClientRect();
   scroller.scrollLeft+=(pr2.left+px*z)-cx;
   scroller.scrollTop +=(pr2.top +py*z)-cy;
+  invalidateRect();
 }
 function fitPage(){
   const w=scroller.clientWidth-52, h=scroller.clientHeight-52;
