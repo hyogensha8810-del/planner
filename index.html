@@ -162,6 +162,11 @@ input[type=range]{width:110px;accent-color:var(--accent)}
 .mrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 .btn{padding:9px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;font-size:13px}
 .btn.pri{background:var(--bar);border-color:var(--bar);color:#fff}
+.verchip{font-size:11px;opacity:.55;padding:0 6px;letter-spacing:.04em}
+#diag{position:fixed;left:10px;bottom:10px;z-index:150;background:rgba(20,32,46,.92);color:#cfe6ff;
+  font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;padding:9px 11px;border-radius:10px;
+  max-width:min(92vw,460px);pointer-events:none}
+#diag b{color:#fff}
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#24425f;color:#fff;
   padding:10px 18px;border-radius:999px;font-size:13px;z-index:300;opacity:0;transition:opacity .25s;pointer-events:none}
 .toast.on{opacity:1}
@@ -194,6 +199,7 @@ input[type=range]{width:110px;accent-color:var(--accent)}
     <button class="tbtn" id="bRedo" title="やり直す"><svg viewBox="0 0 24 24"><path d="M15 8h4V4"/><path d="M19 8a8 8 0 10-3 9.5"/></svg></button>
     <div class="sp"></div>
     <span class="savechip" id="saveChip">保存済み</span>
+    <span class="verchip" id="verChip"></span>
     <button class="tbtn" id="bZoomOut" title="縮小"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M8.5 11h5M16 16l4 4"/></svg></button>
     <button class="tbtn" id="bZoomIn" title="拡大"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M8.5 11h5M11 8.5v5M16 16l4 4"/></svg></button>
     <button class="tbtn" id="bFit" title="全体表示"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
@@ -265,10 +271,12 @@ input[type=range]{width:110px;accent-color:var(--accent)}
 <input type="file" id="imgInput" accept="image/*" style="display:none">
 <input type="file" id="jsonInput" accept="application/json,.json" style="display:none">
 <div class="toast" id="toast"></div>
+<div id="diag" hidden></div>
 <script>
 /* =========================================================
    Handwriting Planner — core
    ========================================================= */
+const APP_VERSION = 'v7';
 const PAGE_W = 1600, PAGE_H = 1180;
 const L = {
   side : {x:56,  w:252},
@@ -930,6 +938,42 @@ cv.addEventListener('pointermove',onMove);
 window.addEventListener('pointerup',onUp);
 window.addEventListener('pointercancel',onUp);
 
+/* iPadOS「スクリブル」対策。
+   Apple Pencil の入力はシステムが手書き文字認識の候補として横取りすることがあり、
+   その間ブラウザにイベントが届かず、線が途中で切れる（Excalidraw も同じ修正を入れている）。
+   touchstart / touchmove の既定動作を「即座に」打ち消すと、この要素は自前で
+   入力を扱うとシステムに伝わり、横取りされなくなる。 */
+cv.addEventListener('touchstart',e=>{ e.preventDefault(); },{passive:false});
+cv.addEventListener('touchmove',e=>{ e.preventDefault(); },{passive:false});
+
+/* ---------- 診断（iPadで実測するため） ---------- */
+const DIAG={on:false,rows:[],cur:null,cancels:0};
+window.addEventListener('pointercancel',()=>{ DIAG.cancels++; if(DIAG.cur) DIAG.cur.cancel++; },true);
+function diagStart(ev){
+  DIAG.cur={t0:performance.now(),last:performance.now(),mv:0,gap:0,hnd:0,cancel:0,type:ev.pointerType};
+}
+function diagMove(t0){
+  const c=DIAG.cur; if(!c) return;
+  const now=performance.now();
+  c.gap=Math.max(c.gap,now-c.last); c.last=now; c.mv++; c.hnd+=now-t0;
+}
+function diagEnd(pts){
+  const c=DIAG.cur; if(!c) return; DIAG.cur=null;
+  c.pts=pts; c.ms=Math.round(performance.now()-c.t0);
+  DIAG.rows.unshift(c); if(DIAG.rows.length>12) DIAG.rows.pop();
+  if(DIAG.on) diagPaint();
+}
+function diagPaint(){
+  const d=$('diag'); if(!d) return;
+  d.innerHTML='<b>診断 '+APP_VERSION+'</b>　pointercancel合計: '+DIAG.cancels+
+    '<div style="opacity:.7;margin:2px 0 4px">pts=記録点 / mv=届いたイベント数 / ms=筆記時間 / gap=イベントが途切れた最大ms / hnd=自前処理に使ったms</div>'+
+    DIAG.rows.map(r=>{
+      const bad=r.gap>250||r.cancel>0;
+      return `<div style="color:${bad?'#ff9d9d':'#cfe6ff'}">${r.type} pts=${r.pts} mv=${r.mv} ms=${r.ms} `+
+             `<b>gap=${Math.round(r.gap)}</b> hnd=${Math.round(r.hnd)}${r.cancel?' <b>CANCEL</b>':''}</div>`;
+    }).join('');
+}
+
 /* ---------- 定規スナップ：ペンを止めたまま約0.9秒で直線に整える ---------- */
 let holdAnchor=[0,0], holdTimer=null;
 const HOLD_MS=900, HOLD_MIN_LEN=40;
@@ -973,6 +1017,7 @@ function cancelStroke(){
 }
 function onDown(ev){
   if(ev.button===2) return;
+  if(ta&&S.tool!=='text') closeEditor();   // touchstart を打ち消すと blur が来ないため
   if(ev.pointerType==='pen') lastPenAt=performance.now();
   if(ev.pointerType==='touch'){
     // パームリジェクション：ペンで描画中／直後の指は完全に無視する
@@ -1002,7 +1047,7 @@ function onDown(ev){
       w0:marker?MK_W[S.marker.w]:PEN_W[S.pen.w],
       p:[[x,y,ev.pressure||.5]]};
     S.items.push(it); cursor=it; mode='draw';
-    drawType=ev.pointerType; drawId=ev.pointerId;   // このストロークの持ち主を固定
+    drawType=ev.pointerType; drawId=ev.pointerId; diagStart(ev);   // このストロークの持ち主を固定
     baseValid=false; drawnIdx=0;
     if(marker){ liveMode='blit'; buildBase(it); paintLive(); }
     else { liveMode='append'; appendDraw(); }
@@ -1051,6 +1096,7 @@ function onMove(ev){
   const [x,y]=toPage(ev);
   movedFlag=true;
   if(mode==='draw'){
+    const _t0=performance.now();
     if(cursor.straight){                       // 定規モード：終点だけ動かす
       cursor.p[1]=[x,y,cursor.p[1][2]];
     }else{
@@ -1065,6 +1111,7 @@ function onMove(ev){
     }
     if(Math.hypot(x-holdAnchor[0],y-holdAnchor[1])>3){ holdAnchor=[x,y]; armHold(); }
     if(liveMode==='append') appendDraw(); else liveRender();
+    diagMove(_t0);
     return;
   }
   if(mode==='erase'){ eraseAt(x,y); return; }
@@ -1113,6 +1160,7 @@ function onUp(ev){
   if(mode==='draw'&&drawId!=null&&ev&&ev.pointerId!==drawId) return;
   if(mode==='draw'){
     disarmHold();
+    diagEnd(cursor?cursor.p.length:0);
     const wasMarker=cursor&&cursor.mode==='marker';
     cursor=null; drawType=null; drawId=null; baseValid=false;
     if(wasMarker||liveMode==='blit') requestRender();   // 重ね順を整えるのはこの時だけ
@@ -1463,9 +1511,16 @@ $('bMenu').onclick=()=>{
       <button class="btn pri" id="mBk">Driveへバックアップ</button>
       <button class="btn" id="mRs">Driveから復元</button>
     </div>
+    <h2 style="margin-top:22px">診断</h2>
+    <p>ペンの入力が途切れる場合、原因が「アプリの処理落ち」なのか「iPadOS側の横取り」なのかを切り分けられます。ONにして数文字書き、左下の表示を撮って送ってください。</p>
+    <div class="mrow"><button class="btn" id="mDiag">診断表示の ON / OFF</button></div>
     <h2 style="margin-top:22px">iPad / PC でアプリとして使う</h2>
     <p>Safari または Chrome でこのページを開き、共有メニューから「ホーム画面に追加」。アドレスバーのないフルスクリーンのアプリとして起動します。</p>
   `,(box,close)=>{
+    box.querySelector('#mDiag').onclick=()=>{
+      DIAG.on=!DIAG.on; $('diag').hidden=!DIAG.on; if(DIAG.on) diagPaint(); close();
+      toast(DIAG.on?'診断表示をONにしました':'診断表示をOFFにしました');
+    };
     box.querySelector('#mExp').onclick=async()=>{ await exportJSON(); };
     box.querySelector('#mImp').onclick=()=>{ $('jsonInput').click(); close(); };
     box.querySelector('#mCid').onchange=e=>localStorage.setItem('gdrive_client_id',e.target.value.trim());
@@ -1599,6 +1654,7 @@ document.addEventListener('visibilitychange',()=>{ if(document.hidden) flushSave
   if(navigator.maxTouchPoints>1){            // iPad等：既定でパームリジェクションON
     S.penOnly=true; $('penOnly').checked=true;
   }
+  $('verChip').textContent=APP_VERSION;
   setTool('pen'); setFS(16);
   syncChromeH();
   await Store.init();
