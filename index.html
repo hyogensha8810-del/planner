@@ -304,7 +304,7 @@ input[type=range]{width:110px;accent-color:var(--accent)}
 /* =========================================================
    Handwriting Planner — core
    ========================================================= */
-const APP_VERSION = 'v10';
+const APP_VERSION = 'v11';
 const PAGE_W = 1600, PAGE_H = 1180;
 const L = {
   side : {x:56,  w:252},
@@ -1604,8 +1604,8 @@ $('bMenu').onclick=()=>{
     box.querySelector('#mSyncMsg').textContent = conn
       ? ('接続済み'+(syncAt?'（最終同期 '+new Date(syncAt).toLocaleString('ja-JP')+'）':''))
       : 'この端末はまだ未接続です。「Driveに接続」を押してGoogleアカウントを選び、アクセスを許可してください。';
-    box.querySelector('#mConn').onclick=async()=>{ close(); await syncNow(true); };
-    box.querySelector('#mSyncNow').onclick=async()=>{ close(); await syncNow(true); };
+    box.querySelector('#mConn').onclick=()=>{ close(); connectDrive(); };
+    box.querySelector('#mSyncNow').onclick=()=>{ close(); connectDrive(); };
     box.querySelector('#mDisc').onclick=()=>{ close(); disconnectDrive(); };
   });
 };
@@ -1658,28 +1658,51 @@ function loadGIS(){
   });
   return gisReady;
 }
-async function getToken(interactive){
-  if(accessToken&&Date.now()<tokenExp-60000) return accessToken;
-  await loadGIS();
-  if(!tokenClient){
-    tokenClient=google.accounts.oauth2.initTokenClient({
-      client_id:clientId(), scope:DRIVE_SCOPE, callback:()=>{}
-    });
-  }
+function initTokenClient(){
+  if(tokenClient) return tokenClient;
+  if(!(window.google&&google.accounts&&google.accounts.oauth2)) return null;
+  tokenClient=google.accounts.oauth2.initTokenClient({
+    client_id:clientId(), scope:DRIVE_SCOPE, callback:()=>{}
+  });
+  return tokenClient;
+}
+/* Googleの同意ポップアップはユーザー操作と同じ処理の中で開かないとブロックされる。
+   awaitを挟むと操作の文脈が切れるので、requestAccessToken は同期的に呼ぶ。 */
+function requestToken(interactive){
   return new Promise((res,rej)=>{
+    const tc=initTokenClient();
+    if(!tc) return rej(new Error('not-ready'));
     let done=false;
-    const timer=setTimeout(()=>{ if(!done){ done=true; rej(new Error('timeout')); } },20000);
-    tokenClient.callback=r=>{
+    const timer=setTimeout(()=>{ if(!done){ done=true; rej(new Error('timeout')); } }, interactive?120000:20000);
+    tc.callback=r=>{
       if(done) return; done=true; clearTimeout(timer);
       if(r.error) return rej(new Error(r.error));
       accessToken=r.access_token; tokenExp=Date.now()+((r.expires_in||3500)*1000);
       localStorage.setItem('drive_connected','1');
       res(accessToken);
     };
-    tokenClient.error_callback=e=>{ if(!done){ done=true; clearTimeout(timer); rej(new Error(e&&e.type||'auth')); } };
-    try{ tokenClient.requestAccessToken({prompt:interactive?'':'none'}); }
+    tc.error_callback=e=>{ if(!done){ done=true; clearTimeout(timer); rej(new Error((e&&e.type)||'auth')); } };
+    try{ tc.requestAccessToken({prompt:interactive?'':'none'}); }
     catch(e){ if(!done){ done=true; clearTimeout(timer); rej(e); } }
   });
+}
+async function getToken(interactive){
+  if(accessToken&&Date.now()<tokenExp-60000) return accessToken;
+  if(!tokenClient){ await loadGIS(); initTokenClient(); }
+  return requestToken(interactive);
+}
+/* 接続ボタン専用：awaitを挟まずポップアップを開く */
+function connectDrive(){
+  if(accessToken&&Date.now()<tokenExp-60000){ syncNow(true); return; }
+  if(!initTokenClient()){
+    toast('Google側の準備中です。数秒おいてもう一度お試しください');
+    loadGIS().then(initTokenClient).catch(()=>{});
+    return;
+  }
+  setSync('sync');
+  requestToken(true).then(()=>syncNow(true))
+    .catch(e=>{ setSync(localStorage.getItem('drive_connected')?'err':'off');
+                toast('Driveに接続できませんでした（'+((e&&e.message)||'エラー')+'）',3200); });
 }
 async function driveFind(tok){
   const q=encodeURIComponent(`name='${DRIVE_FILE}' and trashed=false`);
@@ -1760,9 +1783,10 @@ function disconnectDrive(){
   accessToken=null; tokenExp=0; setSync('off');
   toast('Drive同期を解除しました');
 }
-$('bSync').onclick=()=>syncNow(true);
+$('bSync').onclick=()=>connectDrive();
 (function initDrive(){
   paintSync();
+  loadGIS().then(initTokenClient).catch(()=>{});   // 押した瞬間に開けるよう先読み
   if(localStorage.getItem('drive_connected')){
     setSync('idle');
     setTimeout(()=>syncNow(false),2500);                     // 起動時に取り込む
