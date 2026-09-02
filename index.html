@@ -919,20 +919,32 @@ function straighten(){
   toast('直線に整えました',1100);
 }
 
+/* ---------- パームリジェクション ----------
+   ペンで描いている最中／直後に手のひらが触れると、以前はそれが pan / pinch に
+   化けて描画中のストロークが途中で打ち切られていた（＝2画目以降が書けない原因）。
+   ペン入力中とその直後は指のポインタを一切受け付けない。 */
+let lastPenAt=0, drawType=null, drawId=null;
+const PALM_MS=700;
+const penActive=()=>(mode==='draw'&&drawType==='pen')||(performance.now()-lastPenAt<PALM_MS);
+
 /* 描きかけを取り消す（2本目の指が触れたとき用） */
 function cancelStroke(){
   disarmHold();
   if(mode==='draw'&&cursor){
     S.items=S.items.filter(i=>i!==cursor);
     if(S.undo.length) S.undo.pop();
-    cursor=null; render();
+    cursor=null; drawType=null; drawId=null; render();
   }
   if(mode==='lasso'||mode==='lassoRect'){ lassoPts=null; lassoRect=null; renderOverlay(); }
   if(mode!=='pinch') mode=null;
 }
 function onDown(ev){
   if(ev.button===2) return;
+  if(ev.pointerType==='pen') lastPenAt=performance.now();
   if(ev.pointerType==='touch'){
+    // パームリジェクション：ペンで描画中／直後の指は完全に無視する
+    if(mode==='draw'&&drawType==='pen') return;
+    if(S.penOnly&&penActive()) return;
     touches.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
     try{ cv.setPointerCapture(ev.pointerId); }catch(e){}
     if(touches.size===1) gest={max:1,t0:performance.now(),moved:false,sx:ev.clientX,sy:ev.clientY};
@@ -957,6 +969,7 @@ function onDown(ev){
       w0:marker?MK_W[S.marker.w]:PEN_W[S.pen.w],
       p:[[x,y,ev.pressure||.5]]};
     S.items.push(it); cursor=it; mode='draw';
+    drawType=ev.pointerType; drawId=ev.pointerId;   // このストロークの持ち主を固定
     buildBase(it);                 // 確定済みを裏キャンバスへ1回だけ焼く
     holdAnchor=[x,y]; armHold();   // 定規スナップの待機開始
     paintLive(); return;
@@ -981,6 +994,8 @@ function onDown(ev){
   }
 }
 function onMove(ev){
+  if(ev.pointerType==='pen') lastPenAt=performance.now();
+  if(mode==='draw'&&drawId!=null&&ev.pointerId!==drawId) return;  // 手のひら等の混入を遮断
   if(ev.pointerType==='touch'&&touches.has(ev.pointerId)){
     touches.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
     if(Math.hypot(ev.clientX-gest.sx,ev.clientY-gest.sy)>10) gest.moved=true;
@@ -1042,7 +1057,9 @@ function onMove(ev){
   }
 }
 function onUp(ev){
+  if(ev&&ev.pointerType==='pen') lastPenAt=performance.now();
   if(ev&&ev.pointerType==='touch'){
+    if(!touches.has(ev.pointerId)) return;          // 無視した指（手のひら）
     touches.delete(ev.pointerId);
     if(mode==='pinch'&&touches.size<2){ mode=null; pinch=null; fitCanvas(); }
     if(touches.size===0){
@@ -1055,8 +1072,10 @@ function onUp(ev){
       gest={max:0,t0:0,moved:false,sx:0,sy:0};
     }
     if(mode==='pinch'||mode==='pan') return;
+    if(mode==='draw'&&drawType==='pen') return;     // ペンのストロークは指の離しで終わらせない
   }
-  if(mode==='draw'){ disarmHold(); cursor=null; baseValid=false; render(); scheduleSave(); }
+  if(mode==='draw'&&drawId!=null&&ev&&ev.pointerId!==drawId) return;
+  if(mode==='draw'){ disarmHold(); cursor=null; drawType=null; drawId=null; baseValid=false; render(); scheduleSave(); }
   if(mode==='erase'){ scheduleSave(); }
   if(mode==='lasso'||mode==='lassoRect'){
     const poly=mode==='lasso'?lassoPts:
