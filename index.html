@@ -245,6 +245,7 @@ input[type=range]{width:110px;accent-color:var(--accent)}
     </div>
     <div class="grp" data-for="text"><label>色</label><span id="txColors"></span></div>
     <div class="sp" style="flex:1"></div>
+    <span class="switch" style="color:#8d97a1">2本指ピンチ＝拡大縮小 ／ 2本指ダブルタップ＝元に戻す</span>
     <label class="switch"><input type="checkbox" id="penOnly"> ペンのみ描画（指はスクロール）</label>
   </div>
 </div>
@@ -845,22 +846,49 @@ function boxAt(x,y){
   return best;
 }
 
-/* ---------- ポインタ ---------- */
+/* ---------- ポインタ ----------
+   キャンバスは常に touch-action:none。ブラウザ任せのスクロールをやめ、
+   1本指パン / 2本指ピンチ / 2本指ダブルタップ（元に戻す）を自前で処理する。
+   これをしないと iOS Safari が Apple Pencil のドラッグまでスクロールとして扱う。   */
 let mode=null, cursor=null, start=null, lastAng=0, lastDist=0, movedFlag=false;
+const touches=new Map();
+let pinch=null, pan=null, lastTwoTap=0;
+let gest={max:0,t0:0,moved:false,sx:0,sy:0};
+const dist2=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+
 cv.addEventListener('pointerdown',onDown);
 cv.addEventListener('pointermove',onMove);
 window.addEventListener('pointerup',onUp);
 window.addEventListener('pointercancel',onUp);
 
-function isDrawInput(ev){
-  if(S.penOnly && ev.pointerType==='touch') return false;
-  return true;
+/* 描きかけを取り消す（2本目の指が触れたとき用） */
+function cancelStroke(){
+  if(mode==='draw'&&cursor){
+    S.items=S.items.filter(i=>i!==cursor);
+    if(S.undo.length) S.undo.pop();
+    cursor=null; render();
+  }
+  if(mode==='lasso'||mode==='lassoRect'){ lassoPts=null; lassoRect=null; renderOverlay(); }
+  if(mode!=='pinch') mode=null;
 }
 function onDown(ev){
   if(ev.button===2) return;
-  if(!isDrawInput(ev)) return;
+  if(ev.pointerType==='touch'){
+    touches.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+    try{ cv.setPointerCapture(ev.pointerId); }catch(e){}
+    if(touches.size===1) gest={max:1,t0:performance.now(),moved:false,sx:ev.clientX,sy:ev.clientY};
+    else gest.max=Math.max(gest.max,touches.size);
+    if(touches.size>=2){
+      cancelStroke(); pan=null;
+      const t=[...touches.values()];
+      pinch={d:dist2(t[0],t[1])||1, z:S.zoom};
+      mode='pinch';
+      return;
+    }
+    if(S.penOnly){ pan={x:ev.clientX,y:ev.clientY}; mode='pan'; return; }
+  }
   const [x,y]=toPage(ev);
-  cv.setPointerCapture(ev.pointerId);
+  try{ cv.setPointerCapture(ev.pointerId); }catch(e){}
   movedFlag=false;
   if(S.tool==='pen'||S.tool==='marker'){
     pushUndo();
@@ -891,8 +919,23 @@ function onDown(ev){
   }
 }
 function onMove(ev){
-  if(!mode) return;
-  if(!isDrawInput(ev)) return;
+  if(ev.pointerType==='touch'&&touches.has(ev.pointerId)){
+    touches.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+    if(Math.hypot(ev.clientX-gest.sx,ev.clientY-gest.sy)>10) gest.moved=true;
+    if(mode==='pinch'&&touches.size>=2){
+      const t=[...touches.values()];
+      const d=dist2(t[0],t[1])||1;
+      zoomAt(pinch.z*(d/pinch.d),(t[0].x+t[1].x)/2,(t[0].y+t[1].y)/2);
+      return;
+    }
+    if(mode==='pan'&&pan){
+      scroller.scrollLeft-=ev.clientX-pan.x;
+      scroller.scrollTop -=ev.clientY-pan.y;
+      pan={x:ev.clientX,y:ev.clientY};
+      return;
+    }
+  }
+  if(!mode||mode==='pinch'||mode==='pan') return;
   const [x,y]=toPage(ev);
   movedFlag=true;
   if(mode==='draw'){
@@ -925,7 +968,21 @@ function onMove(ev){
     S.selBox=boxOf(S.sel); render(); renderOverlay(); scheduleSave(); return;
   }
 }
-function onUp(){
+function onUp(ev){
+  if(ev&&ev.pointerType==='touch'){
+    touches.delete(ev.pointerId);
+    if(mode==='pinch'&&touches.size<2){ mode=null; pinch=null; fitCanvas(); }
+    if(touches.size===0){
+      if(mode==='pan'){ mode=null; pan=null; }
+      const now=performance.now();
+      if(gest.max===2&&!gest.moved&&now-gest.t0<350){      // 2本指タップ
+        if(now-lastTwoTap<520){ lastTwoTap=0; undo(); toast('元に戻しました'); }
+        else lastTwoTap=now;
+      }
+      gest={max:0,t0:0,moved:false,sx:0,sy:0};
+    }
+    if(mode==='pinch'||mode==='pan') return;
+  }
   if(mode==='draw'){ cursor=null; scheduleSave(); }
   if(mode==='erase'){ scheduleSave(); }
   if(mode==='lasso'||mode==='lassoRect'){
@@ -1130,7 +1187,6 @@ function setTool(t){
     g.style.display=f.includes(t)?'':'none';
   });
   cv.style.cursor = t==='select'?'default' : t==='text'?'text' : 'crosshair';
-  cv.style.touchAction = (S.penOnly||t==='select')?'auto':'none';
   if(t!=='select') clearSel();
 }
 for(const k in TOOL_BTN) $(TOOL_BTN[k]).onclick=()=>setTool(k);
@@ -1162,7 +1218,7 @@ $('bClearPage').onclick=()=>{
   if(!confirm('このページの書き込みをすべて消去します。よろしいですか？')) return;
   pushUndo(); S.items=[]; clearSel(); render(); scheduleSave();
 };
-$('penOnly').onchange=e=>{ S.penOnly=e.target.checked; setTool(S.tool); };
+$('penOnly').onchange=e=>{ S.penOnly=e.target.checked; };
 
 /* テキスト設定 */
 function applyTextStyle(){
@@ -1205,6 +1261,19 @@ function applyZoom(){
   fitCanvas();
 }
 function setZoom(z){ S.zoom=Math.max(.3,Math.min(3,z)); applyZoom(); }
+/* ピンチ用：指の中心を固定したまま拡縮する（キャンバス再生成は指を離してから） */
+function zoomAt(z,cx,cy){
+  z=Math.max(.3,Math.min(3,z));
+  const pr=page.getBoundingClientRect();
+  const px=(cx-pr.left)/S.zoom, py=(cy-pr.top)/S.zoom;
+  S.zoom=z;
+  page.style.transform=`scale(${z})`;
+  stage.style.width=(PAGE_W*z+44)+'px';
+  stage.style.height=(PAGE_H*z+44)+'px';
+  const pr2=page.getBoundingClientRect();
+  scroller.scrollLeft+=(pr2.left+px*z)-cx;
+  scroller.scrollTop +=(pr2.top +py*z)-cy;
+}
 function fitPage(){
   const w=scroller.clientWidth-52, h=scroller.clientHeight-52;
   S.fit=Math.min(w/PAGE_W,h/PAGE_H);
@@ -1391,6 +1460,9 @@ document.addEventListener('visibilitychange',()=>{ if(document.hidden) flushSave
 
 /* ---------- 起動 ---------- */
 (async function init(){
+  if(navigator.maxTouchPoints>1){            // iPad等：既定でパームリジェクションON
+    S.penOnly=true; $('penOnly').checked=true;
+  }
   setTool('pen'); setFS(16);
   syncChromeH();
   await Store.init();
